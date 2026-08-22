@@ -8,6 +8,7 @@
 
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime, timedelta, timezone
@@ -16,11 +17,21 @@ from app import config
 
 KST = timezone(timedelta(hours=9))
 WEEKDAY = config.WEEKDAY
-# _ensure_us_archived가 국내 기록 없이 임시로 폴더를 만들 때 남기는 표시.
-# 이 표시가 있으면 그 폴더의 국내 페이지는 그 날짜의 진짜 데이터가 아니라
-# 만들 당시 우연히 떠 있던 다른 날짜의 페이지입니다 — _archive()가 실제
-# 국내 데이터를 받으면 날짜가 안 맞아도 반드시 덮어쓰도록 이 표시를 봅니다.
-PLACEHOLDER_MARKER = ".kr_placeholder"
+
+
+def _kr_page_date(day_dir):
+    """그 폴더의 index.html이 실제로 담고 있는 국내 거래일을 읽습니다
+    (window.__DATA__에 내장된 dateISO). 폴더 이름과 이 값이 다르면, 그
+    폴더는 _ensure_us_archived가 국내 기록 없이 임시로 만든 자리표시자라는
+    뜻입니다 — 그 시점에 우연히 떠 있던 다른 날짜의 국내 페이지가 그대로
+    담겨 있는 것뿐, 그 폴더 날짜의 진짜 데이터가 아닙니다."""
+    path = os.path.join(day_dir, "index.html")
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        head = f.read(4096)
+    m = re.search(r'"dateISO":"(\d{4}-\d{2}-\d{2})"', head)
+    return m.group(1) if m else None
 
 
 def _copy_kr():
@@ -88,11 +99,13 @@ def _archive():
 
     today_dir = os.path.join(archive_root, date_iso)
     # _ensure_us_archived가 국내 기록이 아직 없어 임시로 만들어 둔 자리표시자일
-    # 수 있습니다 — 그 안엔 그 날짜의 진짜 국내 페이지가 아니라 그 시점에
-    # 우연히 떠 있던 다른 날짜의 국내 페이지가 담겨 있습니다(예: 배포 실패로
-    # 그날 국내 빌드의 결과가 아예 캐시에 저장되지 못한 경우). 진짜 국내
-    # 데이터가 나중에라도 들어오면, 날짜가 안 맞아도 반드시 덮어써야 합니다.
-    placeholder = os.path.exists(os.path.join(today_dir, PLACEHOLDER_MARKER))
+    # 수 있습니다(예: 배포 실패로 그날 국내 빌드의 결과가 캐시에 저장되지
+    # 못한 경우) — 그 안엔 이 폴더 날짜의 진짜 국내 페이지가 아니라 만들
+    # 당시 우연히 떠 있던 다른 날짜의 페이지가 그대로 담겨 있습니다. 폴더
+    # 이름과 그 안 index.html이 실제로 담은 날짜를 대조해서 판단하므로,
+    # 이 기능이 생기기 전에 이미 잘못 채워진 지난 기록도 다음에 진짜
+    # 데이터가 들어오면 그대로 바로잡힙니다.
+    placeholder = os.path.exists(today_dir) and _kr_page_date(today_dir) != date_iso
     if fresh or placeholder or not os.path.exists(today_dir):
         if os.path.exists(today_dir):
             shutil.rmtree(today_dir)
@@ -144,8 +157,6 @@ def _ensure_us_archived():
                 shutil.copytree(s, d)
             elif os.path.exists(s):
                 shutil.copy2(s, d)
-        with open(os.path.join(target_dir, PLACEHOLDER_MARKER), "w") as f:
-            f.write("")
         print(f"[아카이브] {us_date}(미국 기준) 새로 기록 "
               f"— 국내 쪽에 이 날짜 기록이 아직 없어 지금 국내 페이지를 함께 담음 "
               f"(진짜 국내 데이터가 나중에 들어오면 자동으로 교체됨)")
@@ -223,7 +234,7 @@ def _rebuild_dist_archive():
     if os.path.exists(dist_archive):
         shutil.rmtree(dist_archive)
     if os.path.isdir(archive_root):
-        shutil.copytree(archive_root, dist_archive, ignore=shutil.ignore_patterns(PLACEHOLDER_MARKER))
+        shutil.copytree(archive_root, dist_archive)
 
 
 def run(archive: bool):
