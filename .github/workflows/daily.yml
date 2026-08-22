@@ -29,6 +29,8 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    outputs:
+      kr_date: ${{ steps.expected.outputs.date }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -53,6 +55,10 @@ jobs:
 
       - name: Assemble + archive
         run: python assemble.py --archive
+
+      - name: 이번에 만든 날짜 기록 (배포 확인용)
+        id: expected
+        run: echo "date=$(python3 -c "import json;print(json.load(open('cache/kr_latest/meta.json'))['dateISO'])")" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Cloudflare Pages
         if: env.CLOUDFLARE_API_TOKEN != ''
@@ -87,3 +93,32 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: 라이브 사이트가 실제로 갱신됐는지 확인
+        # 빌드·배포 단계가 전부 "성공"으로 끝나도 실제 라이브 사이트가
+        # 그 내용을 서빙하는지는 별개입니다(2026-08-21처럼 Cloudflare가
+        # 조용히 실패하는 경우 포함) — 그래서 방금 만든 국내 거래일이
+        # 실제 두 배포처 중 한 곳에서라도 조회되는지 직접 확인합니다.
+        # 국내 페이지는 별도 JSON이 아니라 index.html에 window.__DATA__로
+        # 내장돼 있어 dateISO 문자열이 그대로 들어있는지로 확인합니다.
+        run: |
+          expected="${{ needs.build.outputs.kr_date }}"
+          if [ -z "$expected" ]; then
+            echo "::warning::확인할 날짜를 못 얻어 이 단계는 건너뜁니다"
+            exit 0
+          fi
+          ok=0
+          for url in "https://stock-daily-briefing.pages.dev/" "https://msjang-stack.github.io/stock-daily-briefing/"; do
+            for i in 1 2 3 4 5; do
+              if curl -fsS "$url" 2>/dev/null | grep -qF "\"dateISO\":\"$expected\""; then
+                echo "[배포 확인] $url → $expected 확인됨"
+                ok=1
+                break
+              fi
+              sleep 6
+            done
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::라이브 사이트 어디에서도 방금 만든 국내 데이터($expected)를 확인하지 못했습니다"
+            exit 1
+          fi
