@@ -52,7 +52,16 @@ def _copy_us():
 def _archive():
     """오늘자 dist/ 전체(국내+미국)를 국내 거래일 기준으로 보관합니다. 국내 빌드가
     남긴 meta.json의 거래일을 씁니다 — '그날'의 기본 정의는 국내 장 기준입니다.
-    (미국 쪽 날짜가 어긋나 있을 때의 보완은 _ensure_us_archived가 따로 맡습니다.)"""
+    (미국 쪽 날짜가 어긋나 있을 때의 보완은 _ensure_us_archived가 따로 맡습니다.)
+
+    종목별 개별 차트 파일(charts/, us/)은 지난 날짜 기록에는 담지 않습니다 —
+    Cloudflare Pages는 한 번의 배포에 최대 20,000개 파일까지만 허용하는데,
+    하루치가 종목별 차트 파일만으로도 1,700개 안팎이라 30일을 그대로 쌓으면
+    가볍게 그 한도를 넘겨 배포 자체가 실패합니다(2026-08-21 실제 발생, "Pages
+    only supports up to 20,000 files"). index.html·us.json에 이미 그날 주요
+    종목 차트가 내장되어 있고, 없는 종목은 검색 시 조용히 "차트 없음"으로
+    빠지게 되어 있어(app/template.html fetchSeries) 지난 날짜에서 개별 차트
+    파일이 빠져도 화면이 깨지지는 않습니다."""
     meta_path = os.path.join(config.KR_CACHE_DIR, "meta.json")
     if not os.path.exists(meta_path):
         print("[아카이브] 국내 데이터가 없어 건너뜁니다")
@@ -76,7 +85,7 @@ def _archive():
     if fresh or not os.path.exists(today_dir):
         if os.path.exists(today_dir):
             shutil.rmtree(today_dir)
-        shutil.copytree(config.OUT_DIR, today_dir, ignore=shutil.ignore_patterns("archive"))
+        shutil.copytree(config.OUT_DIR, today_dir, ignore=shutil.ignore_patterns("archive", "charts", "us"))
         print(f"[아카이브] {date_iso}(국내 기준) 저장")
     else:
         print(f"[아카이브] {date_iso}는 이미 확정된 기록이라 건드리지 않습니다")
@@ -111,10 +120,12 @@ def _ensure_us_archived():
     os.makedirs(archive_root, exist_ok=True)
     target_dir = os.path.join(archive_root, us_date)
 
+    # charts/, us/(종목별 개별 차트)는 _archive()와 같은 이유로 지난 날짜
+    # 기록에는 담지 않습니다 — Cloudflare Pages 20,000개 파일 한도 참고.
     if not os.path.exists(target_dir):
         os.makedirs(target_dir, exist_ok=True)
         for name in os.listdir(config.OUT_DIR):
-            if name == "archive":
+            if name in ("archive", "charts", "us"):
                 continue
             s, d = os.path.join(config.OUT_DIR, name), os.path.join(target_dir, name)
             if os.path.isdir(s):
@@ -125,12 +136,27 @@ def _ensure_us_archived():
               f"— 국내 쪽에 이 날짜 기록이 아직 없어 지금 국내 페이지를 함께 담음")
     else:
         shutil.copy2(us_json_path, os.path.join(target_dir, "us.json"))
-        src_charts = os.path.join(config.US_CACHE_DIR, "us")
-        dst_charts = os.path.join(target_dir, "us")
-        if os.path.isdir(src_charts):
-            if os.path.exists(dst_charts):
-                shutil.rmtree(dst_charts)
-            shutil.copytree(src_charts, dst_charts)
+
+
+def _strip_legacy_chart_dirs():
+    """이 수정 이전에 이미 만들어진 지난 날짜 기록에는 종목별 차트 폴더가
+    그대로 남아 있어, 코드만 고쳐서는 이미 쌓인 파일 수가 줄지 않습니다.
+    다음 조립 때 한 번 정리해서 실제로 20,000개 한도 아래로 내려가게 합니다."""
+    archive_root = os.path.join(config.CACHE_DIR, "archive")
+    if not os.path.isdir(archive_root):
+        return
+    removed = 0
+    for name in os.listdir(archive_root):
+        day_dir = os.path.join(archive_root, name)
+        if not os.path.isdir(day_dir):
+            continue
+        for sub in ("charts", "us"):
+            p = os.path.join(day_dir, sub)
+            if os.path.isdir(p):
+                shutil.rmtree(p)
+                removed += 1
+    if removed:
+        print(f"[아카이브] 지난 기록에 남아 있던 종목별 차트 폴더 {removed}개 정리")
 
 
 def _prune_and_manifest():
@@ -192,6 +218,7 @@ def run(archive: bool):
     if archive:
         _archive()
     _ensure_us_archived()
+    _strip_legacy_chart_dirs()
     _prune_and_manifest()
     _rebuild_dist_archive()
     print(f"[조립] 완료 → {config.OUT_DIR}/")

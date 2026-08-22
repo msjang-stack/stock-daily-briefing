@@ -52,11 +52,21 @@ jobs:
 
       - name: Deploy to Cloudflare Pages
         if: env.CLOUDFLARE_API_TOKEN != ''
+        # Cloudflare 배포가 실패해도(네트워크 문제 등 일시적 원인 포함) 아래
+        # GitHub Pages 배포까지 같이 막히지 않도록 continue-on-error로 분리합니다
+        # — 예전엔 여기서 실패하면 Upload/Pages 배포 단계가 통째로 건너뛰어져
+        # 두 배포처 모두 갱신되지 않는 문제가 있었습니다(2026-08-21 실제 발생).
+        continue-on-error: true
         run: |
-          npx --yes wrangler@4 pages deploy dist \
-            --project-name=${{ vars.CF_PROJECT_NAME || 'stock-daily-briefing' }} \
-            --branch=main \
-            --commit-dirty=true
+          for i in 1 2 3; do
+            npx --yes wrangler@4 pages deploy dist \
+              --project-name=${{ vars.CF_PROJECT_NAME || 'stock-daily-briefing' }} \
+              --branch=main \
+              --commit-dirty=true && exit 0
+            echo "Cloudflare 배포 실패, 재시도 ($i/3)"
+            sleep 10
+          done
+          exit 1
 
       - name: Upload for Pages
         uses: actions/upload-pages-artifact@v3
