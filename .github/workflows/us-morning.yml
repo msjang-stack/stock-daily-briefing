@@ -105,11 +105,7 @@ jobs:
           ok=0
           for url in "https://stock-daily-briefing.pages.dev/us.json" "https://msjang-stack.github.io/stock-daily-briefing/us.json"; do
             for i in 1 2 3 4 5; do
-              live=$(curl -fsS "$url" 2>/dev/null | python3 -c "import json,sys
-try:
-    print(json.load(sys.stdin).get('dateISO',''))
-except Exception:
-    print('')" 2>/dev/null || true)
+              live=$(curl -fsS "$url" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('dateISO',''))" 2>/dev/null || true)
               if [ "$live" = "$expected" ]; then
                 echo "[배포 확인] $url → $expected 확인됨"
                 ok=1
