@@ -16,6 +16,11 @@ from app import config
 
 KST = timezone(timedelta(hours=9))
 WEEKDAY = config.WEEKDAY
+# _ensure_us_archived가 국내 기록 없이 임시로 폴더를 만들 때 남기는 표시.
+# 이 표시가 있으면 그 폴더의 국내 페이지는 그 날짜의 진짜 데이터가 아니라
+# 만들 당시 우연히 떠 있던 다른 날짜의 페이지입니다 — _archive()가 실제
+# 국내 데이터를 받으면 날짜가 안 맞아도 반드시 덮어쓰도록 이 표시를 봅니다.
+PLACEHOLDER_MARKER = ".kr_placeholder"
 
 
 def _copy_kr():
@@ -82,11 +87,18 @@ def _archive():
     os.makedirs(archive_root, exist_ok=True)
 
     today_dir = os.path.join(archive_root, date_iso)
-    if fresh or not os.path.exists(today_dir):
+    # _ensure_us_archived가 국내 기록이 아직 없어 임시로 만들어 둔 자리표시자일
+    # 수 있습니다 — 그 안엔 그 날짜의 진짜 국내 페이지가 아니라 그 시점에
+    # 우연히 떠 있던 다른 날짜의 국내 페이지가 담겨 있습니다(예: 배포 실패로
+    # 그날 국내 빌드의 결과가 아예 캐시에 저장되지 못한 경우). 진짜 국내
+    # 데이터가 나중에라도 들어오면, 날짜가 안 맞아도 반드시 덮어써야 합니다.
+    placeholder = os.path.exists(os.path.join(today_dir, PLACEHOLDER_MARKER))
+    if fresh or placeholder or not os.path.exists(today_dir):
         if os.path.exists(today_dir):
             shutil.rmtree(today_dir)
         shutil.copytree(config.OUT_DIR, today_dir, ignore=shutil.ignore_patterns("archive", "charts", "us"))
-        print(f"[아카이브] {date_iso}(국내 기준) 저장")
+        note = " (자리표시자를 진짜 국내 데이터로 교체)" if placeholder and not fresh else ""
+        print(f"[아카이브] {date_iso}(국내 기준) 저장{note}")
     else:
         print(f"[아카이브] {date_iso}는 이미 확정된 기록이라 건드리지 않습니다")
 
@@ -132,8 +144,11 @@ def _ensure_us_archived():
                 shutil.copytree(s, d)
             elif os.path.exists(s):
                 shutil.copy2(s, d)
+        with open(os.path.join(target_dir, PLACEHOLDER_MARKER), "w") as f:
+            f.write("")
         print(f"[아카이브] {us_date}(미국 기준) 새로 기록 "
-              f"— 국내 쪽에 이 날짜 기록이 아직 없어 지금 국내 페이지를 함께 담음")
+              f"— 국내 쪽에 이 날짜 기록이 아직 없어 지금 국내 페이지를 함께 담음 "
+              f"(진짜 국내 데이터가 나중에 들어오면 자동으로 교체됨)")
     else:
         shutil.copy2(us_json_path, os.path.join(target_dir, "us.json"))
 
@@ -208,7 +223,7 @@ def _rebuild_dist_archive():
     if os.path.exists(dist_archive):
         shutil.rmtree(dist_archive)
     if os.path.isdir(archive_root):
-        shutil.copytree(archive_root, dist_archive)
+        shutil.copytree(archive_root, dist_archive, ignore=shutil.ignore_patterns(PLACEHOLDER_MARKER))
 
 
 def run(archive: bool):
