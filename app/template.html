@@ -1473,23 +1473,50 @@
   (function () {
     var sel = document.getElementById("dateSelect");
     if (!sel) return;
-    fetch("/archive/manifest.json")
+
+    // 이 페이지가 '어느 날짜의 페이지인지'는 국내 데이터로 고정합니다.
+    // D는 미국 탭으로 옮기면 미국 데이터로 바뀌어서 기준으로 쓸 수 없습니다.
+    var pageDate = KR_DATA.dateISO || "";
+    var onArchive = location.pathname.indexOf("/archive/") !== -1;
+    var newest = "";
+
+    function isReload() {
+      try {
+        var nav = performance.getEntriesByType("navigation")[0];
+        if (nav) return nav.type === "reload";
+        return !!(performance.navigation && performance.navigation.type === 1);
+      } catch (e) { return false; }
+    }
+
+    // 목록은 항상 서버에서 새로 받습니다. 캐시된 옛 목록을 쓰면 방금 올라온
+    // 날짜가 안 보여서 "새로고침해도 최신이 아니다"가 됩니다.
+    fetch("/archive/manifest.json", { cache: "no-store" })
       .then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
       .then(function (list) {
         if (!list || !list.length) return;
+        newest = list[0].iso; // manifest는 최신순
+
+        // 지난 날짜를 보다가 새로고침하면 최신으로 돌아옵니다. 날짜를 골라
+        // 들어가는 것은 그대로 두고, 새로고침만 최신으로 보냅니다.
+        if (onArchive && pageDate !== newest && isReload()) { location.replace("/"); return; }
+
         sel.innerHTML = "";
         list.forEach(function (d) {
           var opt = document.createElement("option");
           opt.value = d.iso;
-          opt.textContent = d.iso === D.dateISO ? d.label + " · 오늘" : d.label;
-          if (d.iso === D.dateISO) opt.selected = true;
+          opt.textContent = d.iso === newest ? d.label + " · 최신" : d.label;
+          if (d.iso === pageDate) opt.selected = true;
           sel.appendChild(opt);
         });
       })
       .catch(function () { /* 아카이브가 아직 없으면 '오늘' 하나만 남습니다 */ });
+
     sel.addEventListener("change", function () {
       var v = sel.value;
-      if (!v || v === D.dateISO) { location.href = "/"; return; }
+      if (!v || v === pageDate) return;
+      // 최신 날짜는 항상 루트로 보냅니다 — 지난 날짜 기록에는 종목별 차트
+      // 파일이 없어서(용량 문제로 제외), 같은 날짜라도 루트가 더 완전합니다.
+      if (v === newest) { location.href = "/"; return; }
       location.href = "/archive/" + v + "/";
     });
   })();
