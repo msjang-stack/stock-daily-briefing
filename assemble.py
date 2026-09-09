@@ -226,6 +226,27 @@ def _prune_and_manifest():
     print(f"[아카이브] 보관 중 {len(dates)}일치")
 
 
+def _restyle_archived_page(html, tpl):
+    """지난 날짜 기록을 지금의 화면 코드로 다시 감쌉니다.
+
+    아카이브에는 그날 만들어진 페이지가 통째로 들어 있어서, 화면 쪽을 고쳐도
+    이미 쌓인 날짜들은 옛 화면 그대로 남습니다(고칠 당시 이후에 만들어진
+    날짜만 바뀜). 데이터는 그대로 두고 템플릿만 바꿔 끼워, 지난 날짜도 지금과
+    똑같이 동작하게 합니다 — 화면 수정이 과거 기록에도 바로 반영됩니다."""
+    m = re.search(r"<script>window\.__DATA__ = (.*?);</script>", html, re.S)
+    if not m:
+        return None
+    return (
+        "<!doctype html>\n<html lang=\"ko\">\n<head>\n"
+        "<meta charset=\"utf-8\">\n"
+        "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
+        "</head>\n<body>\n"
+        f"<script>window.__DATA__ = {m.group(1)};</script>\n"
+        + tpl +
+        "\n</body>\n</html>\n"
+    )
+
+
 def _rebuild_dist_archive():
     """date-picker 목록(archive/)을 캐시 전체의 최신 상태로 맞춥니다.
     미국만 갱신한 조립(--archive 없이)에서도 날짜 목록은 그대로 보여야 합니다."""
@@ -233,8 +254,26 @@ def _rebuild_dist_archive():
     dist_archive = os.path.join(config.OUT_DIR, "archive")
     if os.path.exists(dist_archive):
         shutil.rmtree(dist_archive)
-    if os.path.isdir(archive_root):
-        shutil.copytree(archive_root, dist_archive)
+    if not os.path.isdir(archive_root):
+        return
+    shutil.copytree(archive_root, dist_archive)
+
+    with open("app/template.html", encoding="utf-8") as f:
+        tpl = f.read()
+    restyled = 0
+    for name in sorted(os.listdir(dist_archive)):
+        page = os.path.join(dist_archive, name, "index.html")
+        if not os.path.exists(page):
+            continue
+        with open(page, encoding="utf-8") as f:
+            html = f.read()
+        new = _restyle_archived_page(html, tpl)
+        if new and new != html:
+            with open(page, "w", encoding="utf-8") as f:
+                f.write(new)
+            restyled += 1
+    if restyled:
+        print(f"[아카이브] 지난 기록 {restyled}일치를 지금 화면 코드로 다시 감쌈")
 
 
 def run(archive: bool):
