@@ -1,0 +1,30 @@
+name: Watchdog (자동 점검·복구)
+
+on:
+  schedule:
+    # 30분마다. 이 저장소는 GitHub 예약 실행이 0.3~12시간까지 들쭉날쭉하게 늦게
+    # 뜨기 때문에, 하루 한 번 걸어두면 그 한 번이 늦을 때 손쓸 방법이 없습니다.
+    # 촘촘히 걸어두고 그중 가장 먼저 도착한 실행이 복구를 맡게 합니다.
+    # (공개 저장소라 Actions 사용시간은 무료이고, 이상 없으면 10초 남짓 돌고 끝납니다.)
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  actions: write # 늦거나 실패한 빌드를 workflow_dispatch로 다시 띄우기 위해 필요
+
+# 점검이 겹쳐 같은 빌드를 두 번 띄우지 않도록.
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: 배포된 사이트 점검 후 필요하면 재빌드
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 watchdog.py
