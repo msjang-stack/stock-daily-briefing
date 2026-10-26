@@ -1,0 +1,111 @@
+name: Build market issues
+
+on:
+  schedule:
+    # 3시간마다. 뉴스는 장 마감과 무관하게 하루 종일 움직입니다.
+    # (GitHub 예약은 몇 시간씩 늦게 뜨는 일이 잦아, 늦으면 watchdog이 대신 띄웁니다.)
+    - cron: "15 */3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 국내·미국 빌드와 배포가 겹치지 않도록 같은 그룹으로 묶습니다.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    outputs:
+      issue_built: ${{ steps.expected.outputs.built }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: cache
+          # 국내·미국 빌드가 남긴 결과를 이어받아, 이슈만 새로 얹고 나머지는 그대로 둡니다.
+          key: krx-cache-issues-${{ github.run_id }}
+          restore-keys: krx-cache-
+
+      - name: Build issues
+        env:
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: python run_issues.py
+
+      - name: Assemble (아카이브는 국내 빌드가 담당)
+        run: python assemble.py
+
+      - name: 이번에 만든 시각 기록 (배포 확인용)
+        id: expected
+        run: echo "built=$(python3 -c "import json;print(json.load(open('dist/issues.json'))['builtAt'])")" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloudflare Pages
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        # Cloudflare가 실패해도 GitHub Pages 배포까지 같이 막히지 않도록 분리합니다.
+        continue-on-error: true
+        run: |
+          for i in 1 2 3; do
+            npx --yes wrangler@4 pages deploy dist \
+              --project-name=${{ vars.CF_PROJECT_NAME || 'stock-daily-briefing' }} \
+              --branch=main \
+              --commit-dirty=true && exit 0
+            echo "Cloudflare 배포 실패, 재시도 ($i/3)"
+            sleep 10
+          done
+          exit 1
+
+      - name: Upload for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: 라이브 사이트가 실제로 갱신됐는지 확인
+        # 빌드·배포가 "성공"으로 끝나도 실제 사이트가 그 내용을 서빙하는지는 별개입니다.
+        run: |
+          expected="${{ needs.build.outputs.issue_built }}"
+          if [ -z "$expected" ]; then
+            echo "::warning::확인할 시각을 못 얻어 이 단계는 건너뜁니다"
+            exit 0
+          fi
+          ok=0
+          for url in "https://stock-daily-briefing.pages.dev/issues.json" "https://msjang-stack.github.io/stock-daily-briefing/issues.json"; do
+            for i in 1 2 3 4 5; do
+              live=$(curl -fsS "$url" 2>/dev/null | python3 -c "import json,sys; print(json.load(sys.stdin).get('builtAt',''))" 2>/dev/null || true)
+              if [ "$live" = "$expected" ]; then
+                echo "[배포 확인] $url → $expected 확인됨"
+                ok=1
+                break
+              fi
+              sleep 6
+            done
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::라이브 사이트 어디에서도 방금 만든 이슈($expected)를 확인하지 못했습니다"
+            exit 1
+          fi

@@ -65,6 +65,17 @@ def _copy_us():
     print("[조립] 미국 데이터 반영")
 
 
+def _copy_issues():
+    """시장 이슈는 '지금' 기준의 흐름이라 날짜별 기록에는 넣지 않습니다
+    (아래 _archive·_ensure_us_archived에서 issues.json을 빼는 이유)."""
+    src = os.path.join(config.ISSUE_CACHE_DIR, "issues.json")
+    if not os.path.exists(src):
+        print("[조립] 이슈 데이터 없음 (아직 안 만들어졌거나 실패) — 건너뜁니다")
+        return
+    shutil.copy2(src, os.path.join(config.OUT_DIR, "issues.json"))
+    print("[조립] 이슈 데이터 반영")
+
+
 def _archive():
     """오늘자 dist/ 전체(국내+미국)를 국내 거래일 기준으로 보관합니다. 국내 빌드가
     남긴 meta.json의 거래일을 씁니다 — '그날'의 기본 정의는 국내 장 기준입니다.
@@ -109,7 +120,8 @@ def _archive():
     if fresh or placeholder or not os.path.exists(today_dir):
         if os.path.exists(today_dir):
             shutil.rmtree(today_dir)
-        shutil.copytree(config.OUT_DIR, today_dir, ignore=shutil.ignore_patterns("archive", "charts", "us"))
+        shutil.copytree(config.OUT_DIR, today_dir,
+                        ignore=shutil.ignore_patterns("archive", "charts", "us", "issues.json"))
         note = " (자리표시자를 진짜 국내 데이터로 교체)" if placeholder and not fresh else ""
         print(f"[아카이브] {date_iso}(국내 기준) 저장{note}")
     else:
@@ -150,7 +162,7 @@ def _ensure_us_archived():
     if not os.path.exists(target_dir):
         os.makedirs(target_dir, exist_ok=True)
         for name in os.listdir(config.OUT_DIR):
-            if name in ("archive", "charts", "us"):
+            if name in ("archive", "charts", "us", "issues.json"):
                 continue
             s, d = os.path.join(config.OUT_DIR, name), os.path.join(target_dir, name)
             if os.path.isdir(s):
@@ -280,6 +292,7 @@ def run(archive: bool):
     os.makedirs(config.OUT_DIR, exist_ok=True)
     _copy_kr()
     _copy_us()
+    _copy_issues()
     if archive:
         _archive()
     _ensure_us_archived()

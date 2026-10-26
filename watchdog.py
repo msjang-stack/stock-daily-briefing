@@ -35,6 +35,10 @@ SITES = [
 KR_DUE_AFTER = (17, 10)   # 국내 목표 16:40 KST + 유예
 US_DUE_AFTER = (7, 30)    # 미국 목표 07:00 KST + 유예
 
+# 이슈는 날짜가 아니라 '얼마나 묵었나'로 봅니다 — 3시간마다 도는 흐름이라
+# 날짜 비교로는 하루 종일 묵어도 못 잡습니다.
+ISSUE_STALE_HOURS = 5
+
 # 방금 띄운 빌드가 끝나기도 전에 또 띄우지 않도록 하는 최소 간격.
 REDISPATCH_GRACE_MIN = 45
 
@@ -56,7 +60,7 @@ def fetch_live_dates():
     잘라 읽으면 절대 못 찾습니다(종목·차트 데이터가 그 앞에 수백 KB 깔림).
     페이지 전체를 받아서 찾습니다. 템플릿 쪽 자바스크립트에도 builtAt이라는
     말은 나오지만 "builtAt":"날짜 꼴은 데이터에만 있어 섞이지 않습니다."""
-    kr = us = None
+    kr = us = issue = None
     for base in SITES:
         if kr is None:
             try:
@@ -72,9 +76,26 @@ def fetch_live_dates():
                 us = json.loads(_get(f"{base}/us.json")).get("builtAt", " ").split(" ")[0] or None
             except Exception as e:
                 print(f"[점검] {base}/us.json 조회 실패: {type(e).__name__}")
-        if kr and us:
+        if issue is None:
+            try:
+                issue = json.loads(_get(f"{base}/issues.json")).get("builtAt") or None
+            except Exception as e:
+                print(f"[점검] {base}/issues.json 조회 실패: {type(e).__name__}")
+        if kr and us and issue:
             break
-    return kr, us
+    return kr, us, issue
+
+
+def issue_stale(built_at, now):
+    """이슈가 너무 묵었는지. 못 읽었으면(None) 손대지 않습니다 —
+    일시적 조회 실패로 빌드를 계속 걸어대는 쪽이 더 나쁩니다."""
+    if not built_at:
+        return False
+    try:
+        built = datetime.strptime(built_at, "%Y-%m-%d %H:%M").replace(tzinfo=KST)
+    except ValueError:
+        return False
+    return now - built > timedelta(hours=ISSUE_STALE_HOURS)
 
 
 def is_due(market, now):
@@ -131,17 +152,27 @@ def main():
     now = datetime.now(KST)
     now_utc = datetime.now(timezone.utc)
 
-    kr_built, us_built = fetch_live_dates()
+    kr_built, us_built, issue_built = fetch_live_dates()
     today = now.strftime("%Y-%m-%d")
-    print(f"[점검] 지금 {now:%Y-%m-%d %H:%M} KST · 사이트에 올라온 데이터 생성일 "
-          f"— 국내 {kr_built or '읽기 실패'} / 미국 {us_built or '읽기 실패'} (오늘 {today})")
+    print(f"[점검] 지금 {now:%Y-%m-%d %H:%M} KST · 사이트에 올라온 데이터 생성 시각 "
+          f"— 국내 {kr_built or '읽기 실패'} / 미국 {us_built or '읽기 실패'} / "
+          f"이슈 {issue_built or '읽기 실패'} (오늘 {today})")
 
+    todo = []
     for market, built, workflow in (("kr", kr_built, "daily.yml"), ("us", us_built, "us-morning.yml")):
         name = "국내" if market == "kr" else "미국"
-        if not needs_rebuild(market, built, now):
+        if needs_rebuild(market, built, now):
+            todo.append((name, f"마지막 생성 {built}, 오늘 것이 있어야 하는 시각", workflow))
+        else:
             print(f"[점검] {name} 정상")
-            continue
-        print(f"[점검] {name} 갱신 안 됨 (마지막 생성 {built}, 오늘 것이 있어야 하는 시각)")
+
+    if issue_stale(issue_built, now):
+        todo.append(("이슈", f"마지막 생성 {issue_built}, {ISSUE_STALE_HOURS}시간 넘게 안 바뀜", "issues.yml"))
+    else:
+        print("[점검] 이슈 정상")
+
+    for name, why, workflow in todo:
+        print(f"[점검] {name} 갱신 안 됨 ({why})")
         if not token:
             print(f"[복구] 토큰이 없어 {workflow} 를 띄우지 못했습니다")
             continue

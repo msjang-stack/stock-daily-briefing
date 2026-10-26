@@ -50,7 +50,7 @@ def _relevant(name, title, desc, locale="ko"):
 
 # ---------------- 네이버 검색 API ----------------
 
-def _naver(query, want, days):
+def _naver(query, want, days, strict=True):
     if not (config.NAVER_CLIENT_ID and config.NAVER_CLIENT_SECRET):
         return None
     r = S.get(
@@ -67,7 +67,9 @@ def _naver(query, want, days):
     out = []
     for it in r.json().get("items", []):
         title, desc = _clean(it.get("title")), _clean(it.get("description"))
-        if not _relevant(query, title, desc):
+        # strict=False는 시장 전체 이슈용입니다. '코스피' 같은 넓은 검색어는
+        # 종목명 필터를 걸면 멀쩡한 기사까지 떨어져 나갑니다.
+        if strict and not _relevant(query, title, desc):
             continue
         try:
             pub = datetime.strptime(it.get("pubDate", ""), "%a, %d %b %Y %H:%M:%S %z")
@@ -78,7 +80,8 @@ def _naver(query, want, days):
         link = it.get("originallink") or it.get("link") or ""
         out.append({"t": title, "url": link,
                     "s": urllib.parse.urlparse(link).netloc.replace("www.", ""),
-                    "w": _ago(pub)})
+                    "w": _ago(pub), "sum": desc,
+                    "ts": pub.timestamp() if pub else 0})
         if len(out) >= want:
             break
     return out
@@ -86,7 +89,7 @@ def _naver(query, want, days):
 
 # ---------------- 구글 뉴스 RSS (예비, 미국은 주 출처) ----------------
 
-def _google(query, want, days, locale="ko"):
+def _google(query, want, days, locale="ko", strict=True):
     q = urllib.parse.quote(query)
     params = "hl=en-US&gl=US&ceid=US:en" if locale == "en" else "hl=ko&gl=KR&ceid=KR:ko"
     url = f"https://news.google.com/rss/search?q={q}&{params}"
@@ -102,7 +105,7 @@ def _google(query, want, days, locale="ko"):
         src = src_el.text if src_el is not None else ""
         if src and title.endswith(" - " + src):
             title = title[: -(len(src) + 3)]
-        if not _relevant(query, title, "", locale=locale):
+        if strict and not _relevant(query, title, "", locale=locale):
             continue
         try:
             pub = datetime.strptime(it.findtext("pubDate"), "%a, %d %b %Y %H:%M:%S %Z")
@@ -111,11 +114,40 @@ def _google(query, want, days, locale="ko"):
             pub = None
         if pub and pub < cutoff:
             continue
+        # 구글 RSS의 description은 제목·출처를 다시 감싼 링크 뭉치라 요약으로
+        # 쓸 게 못 됩니다. 쓸 만한 문장일 때만 남기고 아니면 비웁니다.
+        desc = _clean(it.findtext("description"))
+        if len(desc) < 20 or desc.startswith(title[:20]):
+            desc = ""
         out.append({"t": title, "url": it.findtext("link") or "",
-                    "s": src or ("Google News" if locale == "en" else "구글뉴스"), "w": _ago(pub)})
+                    "s": src or ("Google News" if locale == "en" else "구글뉴스"),
+                    "w": _ago(pub), "sum": desc,
+                    "ts": pub.timestamp() if pub else 0})
         if len(out) >= want:
             break
     return out
+
+
+def fetch_topic(query, want=6, days=2, locale="ko"):
+    """시장 전체 이슈용. 종목명 필터 없이 검색 결과를 그대로 쓰고 요약까지 담습니다.
+    종목 뉴스(fetch_for)와 달리 '코스피', '환율'처럼 넓은 주제어를 받습니다."""
+    if locale == "en":
+        try:
+            return _google(query, want, days, locale="en", strict=False)
+        except Exception as e:
+            print(f"[이슈] {query} 구글(EN) 실패: {type(e).__name__}: {e}")
+            return []
+    try:
+        got = _naver(query, want, days, strict=False)
+        if got:
+            return got
+    except Exception as e:
+        print(f"[이슈] {query} 네이버 실패: {type(e).__name__}: {e}")
+    try:
+        return _google(query, want, days, strict=False)
+    except Exception as e:
+        print(f"[이슈] {query} 구글 실패: {type(e).__name__}: {e}")
+        return []
 
 
 def fetch_for(name, want=3, days=3, locale="ko"):

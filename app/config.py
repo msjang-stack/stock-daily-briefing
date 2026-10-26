@@ -31,6 +31,7 @@ CACHE_DIR = os.environ.get("CACHE_DIR", "cache")
 # 씁니다. assemble.py가 이 둘을 모아 OUT_DIR로 합칩니다.
 KR_CACHE_DIR = os.path.join(CACHE_DIR, "kr_latest")
 US_CACHE_DIR = os.path.join(CACHE_DIR, "us_latest")
+ISSUE_CACHE_DIR = os.path.join(CACHE_DIR, "issue_latest")
 
 # 유니버스 필터
 MIN_PRICE = _int("MIN_PRICE", 1000)
