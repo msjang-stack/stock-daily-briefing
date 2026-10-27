@@ -238,13 +238,21 @@ def _prune_and_manifest():
     print(f"[아카이브] 보관 중 {len(dates)}일치")
 
 
-def _restyle_archived_page(html, tpl):
-    """지난 날짜 기록을 지금의 화면 코드로 다시 감쌉니다.
+def _read_template():
+    with open("app/template.html", encoding="utf-8") as f:
+        return f.read()
 
-    아카이브에는 그날 만들어진 페이지가 통째로 들어 있어서, 화면 쪽을 고쳐도
-    이미 쌓인 날짜들은 옛 화면 그대로 남습니다(고칠 당시 이후에 만들어진
-    날짜만 바뀜). 데이터는 그대로 두고 템플릿만 바꿔 끼워, 지난 날짜도 지금과
-    똑같이 동작하게 합니다 — 화면 수정이 과거 기록에도 바로 반영됩니다."""
+
+def _rewrap(html, tpl):
+    """페이지의 데이터(window.__DATA__)는 그대로 두고 화면 코드만 지금의
+    template.html로 바꿔 끼웁니다.
+
+    페이지는 만들어질 때 그 시점의 template.html을 통째로 박아서 완성됩니다
+    (app/kr_build.py). 그래서 화면 쪽만 고치고 그 빌드를 다시 돌리지 않으면
+    이미 만들어진 페이지는 옛 화면 그대로 남습니다 — 메인 페이지는 국내
+    빌드(평일 저녁)를 기다려야 했고, 지난 날짜 기록은 아예 영원히 안 바뀌었죠.
+    조립할 때마다 이걸 다시 감싸주면, 어느 쪽 빌드가 돌았든 화면 수정이 바로
+    반영됩니다."""
     m = re.search(r"<script>window\.__DATA__ = (.*?);</script>", html, re.S)
     if not m:
         return None
@@ -259,7 +267,29 @@ def _restyle_archived_page(html, tpl):
     )
 
 
-def _rebuild_dist_archive():
+def _restyle_live_page(tpl):
+    """지금 화면(dist/index.html)도 현재 template.html로 다시 감쌉니다.
+
+    여태 이 재감싸기를 아카이브에만 적용해서, 정작 사람들이 보는 메인 페이지는
+    다음 국내 빌드가 돌 때까지 옛 화면으로 남아 있었습니다 — 화면에 탭을
+    하나 추가해도 이슈 빌드만 돌고 나면 그 탭이 안 보이는 식으로요
+    (2026-10-26 '주요 이슈' 탭이 실제로 이렇게 안 보였음)."""
+    page = os.path.join(config.OUT_DIR, "index.html")
+    if not os.path.exists(page):
+        return
+    with open(page, encoding="utf-8") as f:
+        html = f.read()
+    new = _rewrap(html, tpl)
+    if not new:
+        print("[조립] 경고: 메인 페이지에서 데이터를 찾지 못해 화면 코드를 그대로 둡니다")
+        return
+    if new != html:
+        with open(page, "w", encoding="utf-8") as f:
+            f.write(new)
+        print("[조립] 메인 페이지를 지금 화면 코드로 다시 감쌈")
+
+
+def _rebuild_dist_archive(tpl):
     """date-picker 목록(archive/)을 캐시 전체의 최신 상태로 맞춥니다.
     미국만 갱신한 조립(--archive 없이)에서도 날짜 목록은 그대로 보여야 합니다."""
     archive_root = os.path.join(config.CACHE_DIR, "archive")
@@ -270,8 +300,6 @@ def _rebuild_dist_archive():
         return
     shutil.copytree(archive_root, dist_archive)
 
-    with open("app/template.html", encoding="utf-8") as f:
-        tpl = f.read()
     restyled = 0
     for name in sorted(os.listdir(dist_archive)):
         page = os.path.join(dist_archive, name, "index.html")
@@ -279,7 +307,7 @@ def _rebuild_dist_archive():
             continue
         with open(page, encoding="utf-8") as f:
             html = f.read()
-        new = _restyle_archived_page(html, tpl)
+        new = _rewrap(html, tpl)
         if new and new != html:
             with open(page, "w", encoding="utf-8") as f:
                 f.write(new)
@@ -290,15 +318,18 @@ def _rebuild_dist_archive():
 
 def run(archive: bool):
     os.makedirs(config.OUT_DIR, exist_ok=True)
+    tpl = _read_template()
     _copy_kr()
     _copy_us()
     _copy_issues()
+    # 보관(_archive)보다 먼저 감싸야, 새로 쌓이는 기록도 처음부터 지금 화면입니다.
+    _restyle_live_page(tpl)
     if archive:
         _archive()
     _ensure_us_archived()
     _strip_legacy_chart_dirs()
     _prune_and_manifest()
-    _rebuild_dist_archive()
+    _rebuild_dist_archive(tpl)
     print(f"[조립] 완료 → {config.OUT_DIR}/")
 
 
