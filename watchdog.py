@@ -22,6 +22,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
+import ui_check
+
 KST = timezone(timedelta(hours=9))
 
 # 두 배포처 중 먼저 응답하는 쪽을 봅니다. 어느 쪽이든 최신이면 배포는 성공한 것.
@@ -60,11 +62,12 @@ def fetch_live_dates():
     잘라 읽으면 절대 못 찾습니다(종목·차트 데이터가 그 앞에 수백 KB 깔림).
     페이지 전체를 받아서 찾습니다. 템플릿 쪽 자바스크립트에도 builtAt이라는
     말은 나오지만 "builtAt":"날짜 꼴은 데이터에만 있어 섞이지 않습니다."""
-    kr = us = issue = None
+    kr = us = issue = kr_html = None
     for base in SITES:
         if kr is None:
             try:
-                m = re.search(r'"builtAt":"(\d{4}-\d{2}-\d{2}) ', _get(f"{base}/", timeout=60))
+                kr_html = _get(f"{base}/", timeout=60)
+                m = re.search(r'"builtAt":"(\d{4}-\d{2}-\d{2}) ', kr_html)
                 if m:
                     kr = m.group(1)
                 else:
@@ -83,7 +86,7 @@ def fetch_live_dates():
                 print(f"[점검] {base}/issues.json 조회 실패: {type(e).__name__}")
         if kr and us and issue:
             break
-    return kr, us, issue
+    return kr, us, issue, kr_html
 
 
 def issue_stale(built_at, now):
@@ -96,6 +99,25 @@ def issue_stale(built_at, now):
     except ValueError:
         return False
     return now - built > timedelta(hours=ISSUE_STALE_HOURS)
+
+
+def ui_outdated(kr_html):
+    """라이브 메인 페이지가 옛 화면 코드를 쓰고 있는지.
+
+    데이터 날짜만 보던 기존 점검은 '데이터는 최신인데 화면만 옛것'인 상태를
+    통째로 놓칩니다 — 화면에 탭을 추가해도 안 보이는 식으로요. 판단 불가
+    (None)일 때는 다른 점검들과 같은 원칙으로 손대지 않습니다."""
+    if not kr_html:
+        return False
+    try:
+        verdict = ui_check.is_current(kr_html, ui_check.local_template())
+    except OSError as e:
+        print(f"[점검] 화면 코드 비교 실패({type(e).__name__}) — 건너뜁니다")
+        return False
+    if verdict is None:
+        print("[점검] 화면 코드: 페이지 구조를 못 알아봐 판단 보류")
+        return False
+    return not verdict
 
 
 def is_due(market, now):
@@ -152,7 +174,7 @@ def main():
     now = datetime.now(KST)
     now_utc = datetime.now(timezone.utc)
 
-    kr_built, us_built, issue_built = fetch_live_dates()
+    kr_built, us_built, issue_built, kr_html = fetch_live_dates()
     today = now.strftime("%Y-%m-%d")
     print(f"[점검] 지금 {now:%Y-%m-%d %H:%M} KST · 사이트에 올라온 데이터 생성 시각 "
           f"— 국내 {kr_built or '읽기 실패'} / 미국 {us_built or '읽기 실패'} / "
@@ -170,6 +192,17 @@ def main():
         todo.append(("이슈", f"마지막 생성 {issue_built}, {ISSUE_STALE_HOURS}시간 넘게 안 바뀜", "issues.yml"))
     else:
         print("[점검] 이슈 정상")
+
+    # 데이터가 아니라 화면 코드가 옛것인 경우. 데이터를 새로 받을 필요가 없으니
+    # 외부 API를 안 쓰는 redeploy.yml로 다시 조립해서 올리기만 하면 됩니다.
+    if ui_outdated(kr_html):
+        todo.append(("화면 코드", "라이브가 지금 app/template.html과 다름", "redeploy.yml"))
+    else:
+        print("[점검] 화면 코드 정상")
+
+    # 같은 워크플로를 두 번 띄우지 않습니다 (한 번 돌면 전부 같이 고쳐집니다).
+    seen = set()
+    todo = [t for t in todo if not (t[2] in seen or seen.add(t[2]))]
 
     for name, why, workflow in todo:
         print(f"[점검] {name} 갱신 안 됨 ({why})")

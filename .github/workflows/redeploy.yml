@@ -1,0 +1,107 @@
+name: Redeploy (화면 코드만 다시 입히기)
+
+# 데이터는 그대로 두고 화면 코드만 지금 것으로 다시 입혀 배포합니다.
+# 캐시에 있는 국내·미국·이슈 결과를 다시 조립하기만 하므로 외부 API를 전혀
+# 쓰지 않습니다 — 네이버·KRX가 죽어 있어도 돌고, 30초면 끝납니다.
+#
+# 예약은 없습니다. template.html을 고쳤는데 라이브가 아직 옛 화면일 때
+# watchdog이 이걸 띄웁니다(watchdog.py 화면 코드 점검 참고). 손으로 띄워도 됩니다.
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 국내·미국·이슈 빌드와 배포가 겹치지 않도록 같은 그룹으로 묶습니다.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt
+
+      - name: Restore cache
+        # 읽기 전용(cache/restore)입니다. 보통 actions/cache는 잡이 끝날 때 캐시를
+        # 새로 저장하는데, 재배포는 데이터를 새로 만들지 않으므로 그러면 '이번에
+        # 읽은 옛 스냅샷'이 가장 최신 캐시로 올라앉아 다음 빌드가 그걸 이어받게
+        # 됩니다. 저장하지 않으면 그 위험이 아예 없습니다.
+        uses: actions/cache/restore@v4
+        with:
+          path: cache
+          key: krx-cache-redeploy-never-matches
+          restore-keys: krx-cache-
+
+      - name: 캐시에 데이터가 있는지 확인
+        # 캐시가 비어 있으면 조립해도 빈 사이트가 나갑니다. 지금 올라가 있는
+        # 사이트를 빈 것으로 덮어쓰는 최악을 막기 위해 여기서 멈춥니다.
+        run: |
+          if [ ! -f cache/kr_latest/index.html ]; then
+            echo "::error::캐시에 국내 페이지가 없어 재배포를 중단합니다 (빈 사이트가 나가는 것을 막음)"
+            exit 1
+          fi
+          echo "캐시 확인됨"
+
+      - name: Assemble (아카이브는 국내 빌드가 담당)
+        run: python assemble.py
+
+      - name: Deploy to Cloudflare Pages
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        # Cloudflare가 실패해도 GitHub Pages 배포까지 같이 막히지 않도록 분리합니다.
+        continue-on-error: true
+        run: |
+          for i in 1 2 3; do
+            npx --yes wrangler@4 pages deploy dist \
+              --project-name=${{ vars.CF_PROJECT_NAME || 'stock-daily-briefing' }} \
+              --branch=main \
+              --commit-dirty=true && exit 0
+            echo "Cloudflare 배포 실패, 재시도 ($i/3)"
+            sleep 10
+          done
+          exit 1
+
+      - name: Upload for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: 라이브 화면이 실제로 지금 코드인지 확인
+        # 배포가 "성공"으로 끝나도 실제 사이트가 그 화면을 서빙하는지는 별개입니다.
+        # 이 워크플로의 존재 이유가 바로 그것이므로 직접 확인합니다.
+        run: |
+          for i in 1 2 3 4 5; do
+            python3 ui_check.py && exit 0
+            echo "아직 반영 전인 듯 — 다시 확인 ($i/5)"
+            sleep 10
+          done
+          echo "::error::재배포했는데도 라이브 화면이 지금 코드가 아닙니다"
+          exit 1
