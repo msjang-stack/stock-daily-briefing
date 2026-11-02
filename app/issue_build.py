@@ -64,8 +64,7 @@ def run():
 
     items.sort(key=lambda a: a.get("ts", 0), reverse=True)
     items = items[:TOTAL]
-    for a in items:
-        a.pop("ts", None)  # 정렬에만 쓰고 화면에는 안 내보냅니다
+    # ts(기사 발행 시각, epoch sec)도 내보냅니다 — 미니앱이 "n분 전" 대신 실제 시각을 표시하는 데 씁니다
 
     # 한 건도 못 건졌으면(검색 API 장애, 키 누락 등) 파일을 건드리지 않고 실패로
     # 끝냅니다. 빈 목록으로 덮어쓰면 화면에서 이슈가 통째로 사라지고, builtAt만
