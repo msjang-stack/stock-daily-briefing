@@ -286,6 +286,12 @@ def run():
     with open(out, "w", encoding="utf-8") as f:
         f.write(page)
 
+    # 토스 미니앱용: 페이지에 인라인하는 것과 같은 데이터를 kr.json으로도 내보냅니다.
+    # assemble.py의 _copy_kr()이 meta.json 외 모든 파일을 dist/로 옮기므로 별도
+    # 조립 변경은 필요 없습니다.
+    with open(os.path.join(out_dir, "kr.json"), "w", encoding="utf-8") as f:
+        f.write(payload)
+
     # assemble.py가 아카이브 여부(그날 국내 장이 실제로 열렸는지)를 판단할 때 씁니다.
     # 국내 빌드는 여기서 끝 — 미국이나 아카이브는 전혀 몰라도 됩니다.
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
