@@ -65,6 +65,16 @@ def _copy_us():
     print("[조립] 미국 데이터 반영")
 
 
+def _copy_quotes():
+    """국제 시세도 이슈처럼 '지금' 기준 데이터라 날짜별 기록에는 넣지 않습니다."""
+    src = os.path.join(config.CACHE_DIR, "quotes_latest", "quotes.json")
+    if not os.path.exists(src):
+        print("[조립] 시세 데이터 없음 (아직 안 만들어졌거나 실패) — 건너뜁니다")
+        return
+    shutil.copy2(src, os.path.join(config.OUT_DIR, "quotes.json"))
+    print("[조립] 시세 데이터 반영")
+
+
 def _copy_issues():
     """시장 이슈는 '지금' 기준의 흐름이라 날짜별 기록에는 넣지 않습니다
     (아래 _archive·_ensure_us_archived에서 issues.json을 빼는 이유)."""
@@ -121,7 +131,7 @@ def _archive():
         if os.path.exists(today_dir):
             shutil.rmtree(today_dir)
         shutil.copytree(config.OUT_DIR, today_dir,
-                        ignore=shutil.ignore_patterns("archive", "charts", "us", "issues.json"))
+                        ignore=shutil.ignore_patterns("archive", "charts", "us", "issues.json", "quotes.json"))
         note = " (자리표시자를 진짜 국내 데이터로 교체)" if placeholder and not fresh else ""
         print(f"[아카이브] {date_iso}(국내 기준) 저장{note}")
     else:
@@ -162,7 +172,7 @@ def _ensure_us_archived():
     if not os.path.exists(target_dir):
         os.makedirs(target_dir, exist_ok=True)
         for name in os.listdir(config.OUT_DIR):
-            if name in ("archive", "charts", "us", "issues.json"):
+            if name in ("archive", "charts", "us", "issues.json", "quotes.json"):
                 continue
             s, d = os.path.join(config.OUT_DIR, name), os.path.join(target_dir, name)
             if os.path.isdir(s):
@@ -322,6 +332,7 @@ def run(archive: bool):
     _copy_kr()
     _copy_us()
     _copy_issues()
+    _copy_quotes()
     # 보관(_archive)보다 먼저 감싸야, 새로 쌓이는 기록도 처음부터 지금 화면입니다.
     _restyle_live_page(tpl)
     if archive:
