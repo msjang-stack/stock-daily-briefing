@@ -1,0 +1,75 @@
+# stock-daily-briefing 리포의 .github/workflows/ 에 추가할 주간 로또 빌드 (초안, 아직 푸시하지 않음)
+# 추첨: 매주 토요일 20:45 KST. 소스(smok95/lotto)는 보통 당일 21시대 갱신 확인.
+# 1차 토 21:30 KST, 2차 일 09:00 KST (소스 갱신이 늦을 경우 대비 재시도 성격).
+name: Build lotto results (weekly)
+
+on:
+  schedule:
+    - cron: "30 12 * * 6"   # 토 21:30 KST
+    - cron: "0 0 * * 0"     # 일 09:00 KST
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Restore cache (기존 빌드 결과 이어받기)
+        uses: actions/cache@v4
+        with:
+          path: dist
+          key: pages-dist-${{ github.run_id }}
+          restore-keys: pages-dist-
+
+      - name: Assemble
+        run: python assemble.py
+
+      - name: Build lotto json (assemble 뒤에 실행해 dist/lotto 보존)
+        run: python lotto_build.py   # 리포 루트의 lotto_build.py
+
+      - name: Deploy to Cloudflare Pages
+        if: env.CLOUDFLARE_API_TOKEN != ''
+        continue-on-error: true
+        run: |
+          for i in 1 2 3; do
+            npx --yes wrangler@4 pages deploy dist \
+              --project-name=${{ vars.CF_PROJECT_NAME || 'stock-daily-briefing' }} \
+              --branch=main \
+              --commit-dirty=true && exit 0
+            echo "Cloudflare 배포 실패, 재시도 ($i/3)"
+            sleep 10
+          done
+          exit 1
+
+      - name: Upload for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
