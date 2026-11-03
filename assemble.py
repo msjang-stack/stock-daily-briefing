@@ -10,7 +10,9 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import urllib.request
 from datetime import datetime, timedelta, timezone
 
 from app import config
@@ -326,6 +328,65 @@ def _rebuild_dist_archive(tpl):
         print(f"[아카이브] 지난 기록 {restyled}일치를 지금 화면 코드로 다시 감쌈")
 
 
+LIVE_LOTTO_BASE = "https://stock-daily-briefing.pages.dev/lotto"
+
+
+def _lotto_json_ok(path):
+    """dist/lotto 아래 파일이 진짜 JSON인지 확인합니다.
+    Pages SPA 폴백(index.html)이 200으로 내려오는 사고를 걸러내는 장치입니다."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(64).lstrip()
+        if not head.startswith(b"{"):
+            return False
+        with open(path, encoding="utf-8") as f:
+            json.load(f)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _ensure_lotto():
+    """로또 JSON 보증. dist/lotto/{latest,stats}.json이 항상 진짜 JSON으로
+    존재하게 만듭니다. 2026-11-03에 lotto_build.py를 안 돌리는 배포가
+    /lotto/* 를 통째로 지워 라이브 앱이 깨진 적이 있습니다.
+    1) lotto_build.py로 새로 빌드 → 2) 실패하면 지금 라이브에서 받아오기 →
+    3) 둘 다 실패하면 배포를 멈춥니다(조용히 지워지는 것보다 낫습니다)."""
+    outdir = os.path.join(config.OUT_DIR, "lotto")
+    targets = [os.path.join(outdir, n) for n in ("latest.json", "stats.json")]
+
+    try:
+        subprocess.run(
+            [sys.executable, "lotto_build.py"], check=True,
+            capture_output=True, text=True, timeout=120)
+    except Exception as e:
+        print(f"[로또] lotto_build.py 실패, 라이브에서 복구 시도: {e}")
+
+    if all(_lotto_json_ok(p) for p in targets):
+        print("[로또] dist/lotto JSON 확인 완료")
+        return
+
+    os.makedirs(outdir, exist_ok=True)
+    for name, path in zip(("latest.json", "stats.json"), targets):
+        try:
+            req = urllib.request.Request(
+                f"{LIVE_LOTTO_BASE}/{name}",
+                headers={"User-Agent": "stock-daily-briefing-assemble"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                data = r.read()
+            if data.lstrip()[:1] == b"{":
+                with open(path, "wb") as f:
+                    f.write(data)
+        except Exception as e:
+            print(f"[로또] 라이브 {name} 복구 실패: {e}")
+
+    if not all(_lotto_json_ok(p) for p in targets):
+        raise RuntimeError(
+            "dist/lotto JSON을 확보하지 못했습니다. "
+            "배포하면 라이브 로또 앱이 깨지므로 중단합니다.")
+    print("[로또] 라이브 데이터로 dist/lotto 복구 완료")
+
+
 def run(archive: bool):
     os.makedirs(config.OUT_DIR, exist_ok=True)
     tpl = _read_template()
@@ -333,6 +394,7 @@ def run(archive: bool):
     _copy_us()
     _copy_issues()
     _copy_quotes()
+    _ensure_lotto()
     # 보관(_archive)보다 먼저 감싸야, 새로 쌓이는 기록도 처음부터 지금 화면입니다.
     _restyle_live_page(tpl)
     if archive:
