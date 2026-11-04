@@ -1,0 +1,24 @@
+name: og-import
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decode OG images into og/
+        run: |
+          mkdir -p og
+          base64 -d .github/og-upload/fortune-moa.b64 > og/fortune-moa.png
+          base64 -d .github/og-upload/lotto-hub.b64 > og/lotto-hub.png
+          rm -rf .github/og-upload
+          file og/fortune-moa.png og/lotto-hub.png
+      - name: Commit and push
+        run: |
+          git config user.name 'Instinct Agent'
+          git config user.email 'agent@instinct.com'
+          git add -A
+          git commit -m 'Add OG images for fortune-moa and lotto-hub'
+          git push
