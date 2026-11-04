@@ -1,0 +1,5 @@
+{
+  "haru-ai-daily": { "enabled": false, "templateCode": "", "adGroupId": "" },
+  "kr-close-briefing": { "enabled": false, "templateCode": "" },
+  "us-close-briefing": { "enabled": false, "templateCode": "" }
+}
