@@ -1,5 +1,25 @@
 {
-  "haru-ai-daily": { "enabled": false, "templateCode": "", "adGroupId": "" },
-  "kr-close-briefing": { "enabled": false, "templateCode": "" },
-  "us-close-briefing": { "enabled": false, "templateCode": "" }
+  "haru-ai-daily": {
+    "enabled": false,
+    "templateCode": "",
+    "adGroupId": ""
+  },
+  "kr-close-briefing": {
+    "enabled": false,
+    "templateCode": ""
+  },
+  "us-close-briefing": {
+    "enabled": false,
+    "templateCode": ""
+  },
+  "fortune-moa": {
+    "enabled": false,
+    "templateCode": "",
+    "adGroupId": "ait.v2.live.ccb0e9cf84a340e2"
+  },
+  "lotto-hub": {
+    "enabled": false,
+    "templateCode": "",
+    "adGroupId": "ait.v2.live.3c2168dc08b74ca2"
+  }
 }
