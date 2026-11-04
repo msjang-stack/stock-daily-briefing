@@ -387,6 +387,22 @@ def _ensure_lotto():
     print("[로또] 라이브 데이터로 dist/lotto 복구 완료")
 
 
+def _copy_static():
+    """repo 루트의 정적 파일도 배포에 포함합니다.
+    og/는 공유 카드(OG) 미리보기 이미지, miniapp-push.json은 미니앱들이
+    푸시 템플릿/광고 그룹 ID를 원격으로 읽어가는 설정 파일입니다.
+    둘 다 repo 루트에 있지만 dist/는 조립 결과만 담으므로 여기서 명시적으로 복사합니다."""
+    if os.path.isdir("og"):
+        dst = os.path.join(config.OUT_DIR, "og")
+        if os.path.exists(dst):
+            shutil.rmtree(dst)
+        shutil.copytree("og", dst)
+        print("[조립] og/ 반영")
+    if os.path.exists("miniapp-push.json"):
+        shutil.copy2("miniapp-push.json", os.path.join(config.OUT_DIR, "miniapp-push.json"))
+        print("[조립] miniapp-push.json 반영")
+
+
 def run(archive: bool):
     os.makedirs(config.OUT_DIR, exist_ok=True)
     tpl = _read_template()
@@ -394,6 +410,7 @@ def run(archive: bool):
     _copy_us()
     _copy_issues()
     _copy_quotes()
+    _copy_static()
     _ensure_lotto()
     # 보관(_archive)보다 먼저 감싸야, 새로 쌓이는 기록도 처음부터 지금 화면입니다.
     _restyle_live_page(tpl)
