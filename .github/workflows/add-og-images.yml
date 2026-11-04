@@ -1,6 +1,6 @@
 name: add-og-images
 on:
-  workflow_dispatch:
+  push:
 permissions:
   contents: write
 jobs:
