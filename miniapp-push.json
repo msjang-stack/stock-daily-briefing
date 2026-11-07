@@ -8,6 +8,10 @@
     "enabled": false,
     "templateCode": ""
   },
+  "kr-close-briefing-us": {
+    "enabled": false,
+    "templateCode": ""
+  },
   "us-close-briefing": {
     "enabled": false,
     "templateCode": ""
