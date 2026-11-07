@@ -35,17 +35,28 @@ def _ago(dt):
     return f"{int(h // 24)}일 전"
 
 
+MARKET_KWS = ("주가", "증권", "코스피", "코스닥", "실적", "공시", "상장",
+              "장중", "종가", "급등", "급락", "외국인", "기관", "투자", "매수", "매도")
+
+
 def _relevant(name, title, desc, locale="ko"):
-    """종목명이 제목이나 본문에 실제로 들어간 기사만 통과."""
-    blob = f"{title} {desc}"
+    """종목 기사 필터. 종목명은 제목에 있어야 통과합니다.
+
+    본문(desc)에만 종목명이 한 번 언급되는 기사(정치·마트 휴무 같은
+    무관한 뉴스)는 걸러냅니다. 다만 제목에 시장 키워드가 함께 있으면
+    본문 언급 기사도 예외로 둡니다.
+    """
+    title = title or ""
+    desc = desc or ""
     if locale == "en":
-        return name.lower() in blob.lower()
-    if name in blob:
+        return name.lower() in title.lower()
+    if name in title:
         return True
-    # '삼성전자' → '삼성' 처럼 앞부분만 나오는 경우도 허용 (4자 이상일 때)
-    return len(name) >= 4 and name[:3] in blob and any(
-        k in blob for k in ("주가", "증권", "코스피", "코스닥", "실적", "공시", "상장")
-    )
+    # '삼성전자' → '삼성' 처럼 앞부분만 제목에 나오는 경우도 허용 (4자 이상일 때)
+    if len(name) >= 4 and name[:3] in title and any(k in title for k in MARKET_KWS):
+        return True
+    # 제목엔 없지만 본문에 종목명이 있고 제목에 시장 키워드가 있는 기사만 허용
+    return name in desc and any(k in title for k in MARKET_KWS)
 
 
 # ---------------- 네이버 검색 API ----------------
