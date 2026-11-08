@@ -2,7 +2,8 @@
   "haru-ai-daily": {
     "enabled": false,
     "templateCode": "",
-    "adGroupId": ""
+    "adGroupId": "ait.v2.live.43f49d965914473a",
+    "fullScreenAdGroupId": "ait.v2.live.07fcccff399b43c7"
   },
   "kr-close-briefing": {
     "enabled": false,
